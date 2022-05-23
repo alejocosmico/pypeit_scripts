@@ -1,0 +1,121 @@
+PypeIt
+
+Execute the following steps on a Terminal window.
+
+
+Install PypeIt
+--------------
+-> Download this file: https://github.com/pypeit/PypeIt/blob/release/environment.yml and navigate to the folder
+
+-> Create the conda environment with all the pypeit code:
+conda env create -f environment.yml
+conda activate pypeit
+
+* Note: for new macbooks with Apple Silicon chips, check out https://pypeit.readthedocs.io/en/release/installing.html for instructions.
+
+
+Organize the data and initialize
+--------------------------------
+Navigate to the folder with all the raw images (the "rawfolder") for the same night (i.e., run this pipeline one night at a time).
+Inside the rawfolder, make a folder called reduce/ and navigate to it.
+
+Run:
+pypeit_setup -r /full-path-to-rawfolder/b. -s mdm_osmos_mdm4k -c A
+(where "b." is an example of filename prefix of all relevant files)
+
+
+Edit the mdm_osmos_mdm4k_A/mdm_osmos_mdm4k_A.pypeit file
+--------------------------------------------------------
+-> Add the following blocks, right below "[rdx]; spectrograph = mdm_osmos_mdm4k":
+
+[baseprocess]
+    use_biasimage = False
+    use_overscan = True
+[calibrations]
+  [[wavelengths]]
+    refframe = observed
+  [[slitedges]]
+    minimum_slit_length = 100
+[flexure]
+    spec_method = boxcar
+
+If using HgNe lamps instead of Ar or ArXe, add to the [calibrations] block:
+  [[wavelengths]]
+    lamps = HgI, NeI
+
+"minimum_slit_length" parameter is used to remove ghost slits detected near the edges (which happens sometimes).
+"spec_method" parameter is to implement a wavelength shift relative to an archive sky spectrum.
+
+-> Verify (and edit if necessary) frametypes and object names for science and standard stars
+-> MISflats should have frametype "pixelflat,illumflat,trace"
+-> Arc lamps should have frametype "arc,tilt" 
+-> There shouldn't be any file with frametype="none"; either fix it or remove it from table
+
+
+Run the main extraction code
+----------------------------
+Navigate into mdm_osmos_mdm4k_A/, and run:
+run_pypeit mdm_osmos_mdm4k_A.pypeit (this will take a while)
+
+
+Perform flux calibration
+------------------------
+Navigate to Science/, and run:
+pypeit_sensfunc spec1d_XXXXX.fits
+(where XXXX is the filename for the flux std; if more than one, just pick one)
+
+Run:
+pypeit_flux_setup .
+(make sure to include the final period character)
+
+Edit the mdm_osmos_mdm4k.flux file (output from the previous step):
+-> comment out or delete the [fluxcalib] block 
+-> in the "flux read; flux end" block, add the name of the sens_XXX.fits file (output from the previous step) next to the *first* 1dspec filename (i.e. on the same row as the first 1dspecd filename, separated by a space)
+
+Run:
+pypeit_flux_calib mdm_osmos_mdm4k.flux
+
+
+Visualize the output
+--------------------
+For a simple spectrum plot, run:
+pypeit_show_1dspec spec1d_XXXX.fits
+(where XXXX is the full name of the 1dspec fits filename for each star)
+
+For a list of fits extensions and the names of the targets in each (SPAT####, where #### is the Y pixel of the target), run:
+pypeit_show_1dspec spec1d_XXXX.fits --list
+
+Our science targets are always near 600. So, use this to help you identify which extension in each 1dspec fits file is the relevant one.
+
+
+Co-add spectra
+--------------
+(If co-adding for more than one target, then make a safe copy of the mdm_osmos_mdm4k.coadd1d file)
+-> edit the [coadd1d] block in the .coadd1d file:
+    -> add a coaddfilename, something like 'spec1d_starname_coadd.fits' (include the single quotes)
+    -> comment out the sensfuncfile line
+    -> include in the READ block *only* the files to co-add; make sure you pick the correct SPAT#### from each spec1d
+-> run: pypeit_coadd_1dspec mdm_osmos_mdm4k.coadd1d
+-> routine weighs each individual spectrum based on S/N
+
+
+Run final output extraction python script
+-----------------------------------------
+(Script available at https://github.com/alejocosmico/pypeit_scripts.git)
+Navigate to the rawfolder, then run:
+python /full-path-to-python-script/pypeit_collect.py
+
+
+Understanding final outputs
+---------------------------
+The 1dspec fits files have the name of the science target here: h[0].header['TARGET']
+
+The spectrum is in:
+data['BOX_WAVE'] wavelength array in AA
+data['BOX_FLAM'] flux array in 1e-17 erg/s/cm^2/AA
+data['BOX_FLAM_SIG'] flux uncertainty array in 1e-17 erg/s/cm^2/AA
+
+The co-added fits files will have only one extension (beyond [0]); the spectrum is in:
+data['wave']
+data['flux']
+data['ivar'] (to get uncertainties: sigma = sqrt( 1 / ivar) )
